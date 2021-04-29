@@ -1,0 +1,304 @@
+---
+title: "R Notebook"
+output: html_notebook
+---
+
+
+
+```{r}
+library(tidyverse)
+library(tidyr)
+library(readr)
+library(lubridate)
+library(esquisse)
+library(dplyr)
+library(nycflights13)
+library(dplyr)
+library(ggpubr)
+```
+
+
+#  Load Data
+```{r}
+load(url("https://stat.duke.edu/~mc301/data/nycflights.RData"))
+head(nycflights)
+nycflights$dep_delay <- as.numeric(nycflights$dep_delay)
+```
+
+#  Data Distribution
+
+Distribution is right skewed. I must normalize data to get to a normal distribution
+```{r}
+hist(nycflights$dep_delay, main = "NYC/EWR Flight Delays Distribution", xlab = "NYC/EWR", ylab = "Number of Flights", col = "blue")
+```
+
+ 
+Use 1/x with x being the data column I am targeting 
+```{r}
+nycflights$dep_delay <- 1/(nycflights$dep_delay)
+```
+
+
+Density plot of our transformed data. Still shows a set of outliers that must be removed
+```{r}
+ggdensity(nycflights, x = 'dep_delay', fill = "green", title = "Departue Delay") +
+    stat_overlay_normal_density(color = "red", linetype = "dashed")
+```
+
+
+```{r}
+nycflights_outliers<- boxplot(nycflights$dep_delay, plot=TRUE)$out
+# First you need find in which rows the outliers are
+
+nycflights[which(nycflights$dep_delay %in% nycflights_outliers),]
+# Now you can remove the rows containing the outliers, one possible option is:
+
+nycflights <- nycflights[-which(nycflights$dep_delay %in% nycflights_outliers),]
+
+# If you check now with boxplot, you will notice that those pesky outliers are gone
+
+boxplot(nycflights$dep_delay)
+```
+```{r}
+hist(nycflights$dep_delay)
+```
+
+```{r}
+nycflights$dep_delay <- (1/(nycflights$dep_delay))
+head(nycflights)
+```
+
+
+
+```{r}
+winter.flights <- subset(nycflights, month == 12 | month == 1 | month == 2 | month ==3)
+summer.flights <- subset(nycflights, month == 6 | month == 7 | month == 8)
+fall.flights <- subset(nycflights, month == 9 | month == 10 | month ==11)
+spring.flights <- subset(nycflights, month == 4 | month == 5)
+```
+
+
+#  Mean departure delay based on Season 
+
+
+It seems that the risk of a late departure is more likely in the summer months with an average delay of 21 minutes. This makes sense because peak travel season in the United States are during the summer months. There is also a average 15 minute delay in the winter and a 16 minute delay in the spring. I want to understand if the difference between the average delay between spring and summer and the winter and summer seasons are significantly different or not.
+```{r}
+round(mean(winter.flights$dep_delay))
+round(mean(summer.flights$dep_delay))
+round(mean(fall.flights$dep_delay))
+round(mean(spring.flights$dep_delay))
+```
+
+
+#  t-test 
+
+t-test is used to compare the mean of 2 groups to determine if they are significantly different 
+
+
+Ho: No Significantly different delays during spring and summer
+Ha: Significantly different delays during spring and summer
+
+
+```{r}
+t.test(spring.flights$dep_delay, summer.flights$dep_delay, var.equal = F, conf.level = 0.95)
+```
+
+
+Ho: No Significantly different delays during winter and summer
+Ha: Significantly different delays during winter and summer
+
+
+```{r}
+t.test(winter.flights$dep_delay, summer.flights$dep_delay, var.equal = F, conf.level = 0.95)
+```
+#  Anova
+Try to determine if there is a significant difference between origin and seasonal delays
+```{r}
+delay.aov <- aov(winter.flights$dep_delay ~ winter.flights$origin, data = winter.flights)
+summary(delay.aov)
+```
+
+```{r}
+TukeyHSD(delay.aov)
+```
+
+Conclusion: In both cases the delay time is significantly different from the summer based on p-values < alpha (0.05) This result validates that summer month delays are significantly high than other seasons of the year. 
+
+
+#  Average Delay Based on Carrier and Airport
+```{r}
+unique(nycflights$carrier)
+nycflights$carrier<- as.factor(nycflights$carrier)
+avg_carrier_delay <- nycflights %>% group_by(carrier, origin) %>% summarise(mean_delay = mean(dep_delay))
+avg_carrier_delay
+```
+
+
+```{r}
+avg <- ggplot(data = avg_carrier_delay, aes(y = avg_carrier_delay$mean_delay, x = carrier,  color = origin)) + geom_point(size = 5, alpha = 0.7) + xlab("Carrier") + ylab("Mean Delay")
+
+avg
+```
+
+
+#  EWR Delays
+
+
+Of the 9900 flights out of Newark Airport 2942 of them were delayed by over 15 minutes. That is 30% of all flights leaving Newark. The average delay is about 66 minutes
+```{r}
+ewr_total <- group_by(nycflights[nycflights$origin == "EWR",],month)
+ewr_delay <- filter(nycflights, nycflights$origin == "EWR", dep_delay > 15)
+avg_delay <- mean(ewr_delay$dep_delay)
+avg_delay
+nrow(ewr_delay)/nrow(ewr_total)
+```
+
+```{r}
+ggplot(data = ewr_delay, aes(y = origin,fill = carrier)) + geom_bar(stat = "count", position = "dodge2") +
+  xlab("Newark") + ylab("Number of flight by Carrier") 
+
+```
+
+
+
+#  JFK Delays
+
+Of the 9105 flights leaving out of JFK 2240 of them are more than 15 minutes delayed. That represent over 25% of flights. The average delay is 14.68 minutes a little under the 15 average of all the airports combined
+```{r}
+jfk_total <- group_by(nycflights[nycflights$origin == "JFK",],month)
+jfk_delay <- filter(nycflights, nycflights$origin == "JFK", dep_delay > 15)
+avg_jfk_delay <-mean(jfk_total$dep_delay)
+avg_jfk_delay
+nrow(jfk_delay)/nrow(jfk_total)
+```
+We can see that Jetblue is the most delayed carrier out of JFK. 
+```{r}
+ggplot(data = jfk_delay, aes(x = origin == "JFK", fill = carrier)) + geom_bar(stat = "count", position = "dodge2") +
+  xlab("JKF") + ylab("Number of Flights by Carrier")
+```
+# LGA Delays
+
+Of the 8819 flight out of LGA 1907 of them are delayed by 15 minutes or more. The is 22% of all flights. However, the average delay is only 12 minutes
+```{r}
+lga_total <- group_by(nycflights[nycflights$origin == "LGA",],month)
+lga_delay <- filter(nycflights, nycflights$origin == "LGA", dep_delay > 15)
+avg_lga_delay <- mean(lga_total$dep_delay)
+avg_lga_delay
+nrow(lga_delay)/nrow(lga_total)
+```
+Based on our visual Delta is the most delayed followed by Envoy Air a subsidary of American Airlines. 
+```{r}
+ggplot(data = lga_delay, aes(x = origin == "JFK", fill = carrier)) + geom_bar(stat = "count", position = "dodge2") +
+  xlab("LGA") + ylab("Number of Flights by Carrier")
+```
+#  NYC to San Diego
+```{r}
+nyc_sandiego <- subset(nycflights, dest == "SAN")
+ggplot(data = nyc_sandiego, aes(x = origin , fill = carrier)) + geom_bar( position = "dodge2") +
+  xlab("NYC to San Diego") + ylab("Number of Delays by Carrier")
+```
+```{r}
+nycflights$carrier <- as.factor(nycflights$carrier)
+nycflights$tailnum <- as.factor(nycflights$tailnum)
+nycflights$origin <- as.factor(nycflights$origin)
+nycflights$dest <- as.factor(nycflights$dest)
+```
+
+
+```{r}
+
+nycflights$carrier <- as.integer(nycflights$carrier)
+nycflights$tailnum <- as.integer(nycflights$tailnum)
+nycflights$origin <- as.integer(nycflights$origin)
+nycflights$dest <- as.integer(nycflights$dest)
+
+```
+
+
+#  Split Data into trining and testing set
+
+```{r}
+library(caret)
+set.seed(123)
+training.samples <- nycflights$dep_delay %>% 
+  createDataPartition(p = 0.8, list = FALSE)
+train.data  <- nycflights[training.samples, ]
+test.data <- nycflights[-training.samples, ]
+head(train.data)
+```
+
+#lm full model
+```{r}
+lm_fit <- lm(dep_delay ~., data  = train.data)
+summary(lm_fit)
+```
+
+
+#stepwise regression
+```{r}
+library(MASS)
+step.lm <- lm_fit %>% stepAIC(trace = FALSE, direction = "both") 
+summary(step.lm)
+```
+
+
+```{r}
+lm_fit_Finalmodel <- lm(dep_delay ~ month + dep_time + arr_time + arr_delay + 
+                     flight + origin + dest + air_time + distance + hour, data = train.data)
+summary(lm_fit_Finalmodel)
+```
+
+
+
+```{r}
+lm_predict <- predict(lm_fit_Finalmodel,test.data)
+RMSE(test.data$dep_delay, lm_predict)
+```
+
+
+#  Glm full model 
+
+```{r}
+glm_fit <- glm(dep_delay ~ . , data  = train.data)
+summary(glm_fit)
+```
+
+```{r}
+library(MASS)
+step.glm <- glm_fit %>% stepAIC(trace = FALSE, direction = "both") 
+summary(step.glm)
+```
+
+
+
+
+
+```{r}
+step.glm$anova
+```
+
+
+
+
+
+```{r}
+glm_finalmodel <-glm(dep_delay ~ month + dep_time + arr_time + arr_delay + 
+                     flight + origin + dest + air_time + distance + hour, data = train.data)
+summary(glm_finalmodel)
+```
+
+#  Full Model Prediction
+
+15 min error 
+```{r}
+probabilities <- glm_finalmodel %>% predict(test.data, type = "response")
+RMSE(test.data$dep_delay, probabilities)
+probabilities <- as.data.frame(probabilities)
+
+```
+
+
+
+
+
+
